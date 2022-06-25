@@ -85,7 +85,7 @@ class DFTRM:
     # sm = RBF(type="train", x=xt, y=yt, options=opts, rbf_func="cubic")
     sm = SML.Kriging(type="train", x=xt, y=yt, options=opts)
     sampling = SML.LHS(ns=n, vlim=v)
-    sampling.options["criterion"] = "ese"
+    sampling.options["criterion"] = "ExactSE"
     xp = sampling.generate_samples()
     sm.xt.points = sm.x.points
     sm.x.points = xp
@@ -335,7 +335,7 @@ class OMADS_RAF(RAF_data):
       sampling = SML.FullFactorial(ns=nsamples, vlim=v, w=np.array([0.8, 0.2]), c=True)
     elif self.sampling_t == SML.SAMPLING_METHOD.LH: 
       sampling = SML.LHS(ns=nsamples, vlim=v)
-      sampling.options["criterion"] = "ese"
+      sampling.options["criterion"] = "ExactSE"
     elif self.sampling_t == SML.SAMPLING_METHOD.RS:
       sampling = SML.RS(ns=nsamples, vlim=v, w=None, c=False)
 
