@@ -383,6 +383,9 @@ class RAF_data:
   vicinity_ratio: np.ndarray = field(default=np.ones((1)))
   succ_search: bool = False
 
+@dataclass
+class DOE_RAF():
+  """ Using RAF to manage the use of models during a DOE study """
 
 @dataclass
 class OMADS_RAF(RAF_data):
