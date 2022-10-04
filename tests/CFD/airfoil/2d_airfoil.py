@@ -319,7 +319,6 @@ class airfoil_generator:
     elif solver == "SU2":
       f = os.path.join(os.getcwd(), file_name) 
       data = pd.read_csv(f, header=None)
-      print(data)
       self.CL = data.iloc[-1, 7]
       self.CD = data.iloc[-1, 6]
       self.LDR = data.iloc[-1, 8]
@@ -734,7 +733,8 @@ class airfoil_generator:
     cmd = f'SU2_CFD airfoil.cfg'
     p = subprocess.run(cmd, shell=True) #Popen(cmd, stdin=PIPE, bufsize=0)
     if p.returncode != 0:
-      raise CalledProcessError(p.returncode, cmd)    
+      raise CalledProcessError(p.returncode, cmd)  
+    os.chdir(old)  
 
 
 
