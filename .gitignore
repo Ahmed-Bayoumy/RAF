@@ -26,6 +26,10 @@
 *.a
 *.lib
 
+# SU2 flow outputs
+*.vtu
+restart.dat
+
 # Executables
 *.exe
 *.app
