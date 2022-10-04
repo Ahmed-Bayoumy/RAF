@@ -1,0 +1,21 @@
+{
+  "cSpell.ignoreWords": [
+    "Bayoumy",
+    "OPENFOAM",
+    "TSFOIL",
+    "arctan",
+    "blockmeshdict",
+    "coeffs",
+    "gmsh",
+    "iloc",
+    "linspace",
+    "loadtxt",
+    "logspace",
+    "matplotlib",
+    "pyplot",
+    "skiprows",
+    "tegap",
+    "xlim",
+    "ylim"
+  ]
+}
