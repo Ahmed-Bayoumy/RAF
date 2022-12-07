@@ -1,5 +1,6 @@
 # Prerequisites
 *.d
+.vscode
 
 # Compiled Object files
 *.slo
@@ -33,3 +34,4 @@ restart.dat
 # Executables
 *.exe
 *.app
+Design*

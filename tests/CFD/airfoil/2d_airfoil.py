@@ -21,9 +21,11 @@
 # ------------------------------------------------------------------------------------#
 
 from cmath import pi
+from logging import warn
+import shutil
 import numpy as np
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Callable, Dict, List
 from abc import ABC
 import pandas as pd
 from matplotlib import pyplot as plt
@@ -33,7 +35,9 @@ from subprocess import CalledProcessError, Popen, PIPE
 import copy
 from numpy import linspace, zeros, ones, sin, cos, arctan, pi
 import subprocess
-
+import scipy.integrate as integrate
+from scipy.optimize import minimize, Bounds
+import OMADS
 
 
 @dataclass
@@ -68,7 +72,9 @@ class airfoil_generator:
   Zu: List = None
   Xl: List = None
   Zl: List = None
-  num_pts: int = 64
+  num_pts: int = 100
+  CSA: float = 0.
+  CPmax: float = None
 
   def __init__(self, chord = 1, nPts = 3, degree_t = 4, degree_b = 4, params = None, tegap = 0.001263):
     self.te_gap = tegap
@@ -173,12 +179,22 @@ class airfoil_generator:
     return self.xs,self.ys,t_max,t_min,te_ang
 
   def visualize(self):
-    plt.xlim([0,1])
-    plt.ylim([-0.3, 0.3])
-    plt.plot(self.xs, self.ys)
-    plt.plot(self.Pxt, self.Pyt, '--o')
-    plt.plot(self.Pxb, self.Pyb, '--o')
+    fig, (ax1, ax2) = plt.subplots(2, 1)
+    
+    ax1.set_xlim([0,1])
+    ax1.set_ylim([-0.3, 0.3])
+    ax1.plot(self.xs, self.ys)
+    ax1.plot(self.Pxt, self.Pyt, '--o')
+    ax1.plot(self.Pxb, self.Pyb, '--o')
+    ax2.set_xlim([0,1])
+    if self.cpl is not None and self.cpx is not None and self.cpu is not None:
+      ax2.plot(self.cpx, self.cpl, '-g')
+      ax2.plot(self.cpx, self.cpu, '-')
+    plt.ion()
     plt.show()
+    plt.pause(0.05)
+    ax1.cla()
+    ax2.cla()
     
 
 
@@ -257,6 +273,11 @@ class airfoil_generator:
           val += (k[i+j+1]-t)/(k[i+j+1]-k[i+1])*self.basis_fun(j-1, i+1, k, t)
     return val
   
+  def calc_cross_sectional_area(self, x1, y1, x2, y2):
+    a1 = integrate.simpson(np.add(y1, 10), x1)
+    a2 = integrate.simpson(np.add(y2, 10), x2)
+    self.CSA = abs(a2-a1)
+
   def create_TSFOIL_sim_files(self, initFile:str = 'Initial.inp', id: int = 0):
     # COMPLETE: Prepare required input files to run both TSFOIL and OPENFOAM CFD simulations
     I = np.ones((len(self.xs)))
@@ -264,16 +285,19 @@ class airfoil_generator:
     x2 = [x for x in self.xs[int(len(self.xs)/2):]]
     y1 = np.flip([y for y in self.ys[0:int(len(self.ys)/2)]]).tolist()
     y2 = [y for y in self.ys[int(len(self.ys)/2):]]
+    y1[-1] = 0.
+    y2[-1] = 0.
     x: List = x1
     x+=x2
     y: List = y1
     y+=y2
     L = [x[int(len(x)/2):], y[int(len(y)/2):]]
     U = [x[0:int(len(x)/2)], y[0:int(len(y)/2)]]
+    self.calc_cross_sectional_area(x[0:int(len(x)/2)], y[0:int(len(y)/2)], x[int(len(x)/2):], y[int(len(y)/2):])
     src_f = os.path.join(os.getcwd(), 'tests/CFD/TSFOIL/'+initFile) 
     dest_f = os.path.join(os.getcwd(), f'tests/CFD/TSFOIL/Design{id}.inp') 
 
-    copy(src_f, dest_f)
+    shutil.copyfile(src_f, dest_f)
     with open(dest_f, 'a') as f:
       f.write('\n')
       for i in range(len(U[0])):
@@ -283,17 +307,22 @@ class airfoil_generator:
         f.write(f'   {L[0][i]:1.5f}   {L[1][i]:1.5f} \n')
   
   def run(self, id: int = 0):
-    old = os.getcwd()
-    os.chdir(os.path.join(old, 'tests/CFD/TSFOIL'))
-    cmd = './TSFOIL'
+    self.old = os.getcwd()
+    os.chdir(os.path.join(self.old, 'tests/CFD/TSFOIL'))
+    cmd = './tsfoil'
     input_data = os.linesep.join(['default', f'Design{id}.out', f'Design{id}.inp', os.linesep])
-    p = Popen(cmd, stdin=PIPE, bufsize=0)
+    FNULL = open(os.devnull, 'w')
+    p = Popen(cmd, stdin=PIPE, bufsize=0, stdout=FNULL, stderr=subprocess.STDOUT)
     p.communicate(input_data.encode('ascii'))
+    self.error = False
     if p.returncode != 0:
-      raise CalledProcessError(p.returncode, cmd)
+      # raise CalledProcessError(p.returncode, cmd)
+      warn('This is an unattainable point.')
+      self.error = True
   
-  def get_responses(self, file_name: str = 'Design0', solver: str = "TSFOIL"):
+  def get_responses(self, id:int = 0, file_name: str = 'Design0', solver: str = "TSFOIL"):
     if solver == "TSFOIL":
+      
       dest_f = os.path.join(os.getcwd(), file_name) 
       f = open(dest_f, 'r')
       h = 0
@@ -312,20 +341,55 @@ class airfoil_generator:
         if line == '0\n':
           get = False
       
+      getCL = False
+      getCD = False
+      f.close()
+      f = open(dest_f, 'r')
+      CL = []
+      CD = []
+      k = 0
+      for line in f:
+        temp = line
+        if getCL == True:
+          if k == 0:
+            CL.append([float(x) for x in line.strip().split(' ') if x.lstrip('-').replace('.','',1).isdigit()][1])
+          else:
+            CL.append([float(x) for x in line.strip().split(' ') if x.lstrip('-').replace('.','',1).isdigit()][0])
+          k += 1
+          if k==3:
+            getCL = False
+
+        if temp.strip().split('                     ')[0] == 'FINAL MESH':
+          getCL = True
+      if temp.strip().split(' ')[0] == '0DRAG' and line != '0\n' and line != '0' and line != '\n':
+        getCD = True
+      if getCD == True:
+        CD = [float(x) for x in line.strip().split(' ') if x.lstrip('-').replace('.','',1).isdigit()]
+        getCD = False
+
       f.close()
       self.cpx = [s[1] for s in table]
       self.cpl = [s[3] for s in table]
       self.cpu = [s[5] for s in table]
+      self.CL = copy.deepcopy(CL[0])
+      self.CPmax = copy.deepcopy(CL[2])
+      self.CD = copy.deepcopy(CD[0])
+      shutil.move(os.path.join(os.getcwd(), file_name), f'../../../post/Designs/Design{id}.out')
+      shutil.move(os.path.join(os.getcwd(), f'Design{id}.inp'), f'../../../post/Designs/Design{id}.inp')
+      os.chdir(self.old)
+      return self.cpx, self.cpl, self.cpu, self.CL, self.CPmax, self.CD
     elif solver == "SU2":
       f = os.path.join(os.getcwd(), file_name) 
       data = pd.read_csv(f, header=None)
       self.CL = data.iloc[-1, 7]
       self.CD = data.iloc[-1, 6]
       self.LDR = data.iloc[-1, 8]
+      os.chdir(self.old)
+      return self.CL, self.CD, self.LDR
     else:
+      os.chdir(self.old)
       raise IOError(f'The flow solver {solver} is not supported! We only support SU2 and TSFOIL.')
     
-    return self.CL, self.CD, self.LDR
 
   def gen_OF_blockmeshdict_from_coords(self, alpha_deg=4):
     """ This function generates an OpenFoam block mesh file from the airfoil coordinates """
@@ -736,27 +800,100 @@ class airfoil_generator:
       raise CalledProcessError(p.returncode, cmd)  
     os.chdir(old)  
 
+iter = 0
+def evaluateTSF(x):
+  global iter
+  iter += 1
+  design = airfoil_generator(tegap=0.001263,
+  degree_t=3,
+  degree_b=3,
+  chord = 1,
+  nPts = 2,
+  #        [yt1,  xt2, yt2,  xt3,yt3,    yb1,xb2,     yb2,xb3,    yb3  ]
+  # params = [0.05,  0.3,0.1,  0.6,0.1,  -0.05,0.35,   0.02,0.5,   -0.004]
+  # ------- CPs on upper camber/ Cps on lower camber/ TE thickness
+  params = copy.deepcopy(x)
+  )
+  design.generate()
+  design.create_TSFOIL_sim_files(id=iter)
+  design.run(id=iter)
+  design.get_responses(iter, f'Design{iter}.out', 'TSFOIL')
+  design.visualize()
+  
+
+  CL = copy.deepcopy(design.CL)
+  CSA = copy.deepcopy(design.CSA)
+  CD = copy.deepcopy(design.CD)
+
+  if design.error:
+    CL = np.inf
+    CSA = np.inf
+    CD = np.inf
+
+  del design
+
+  return [-CL, [0.075-CSA, abs(CD)-0.006]]
+  
+
 
 
 if __name__ == "__main__":
   # COMPLETE: Ready for use
   design = airfoil_generator(tegap=0.001263,
-  degree_t=4,
-  degree_b=4,
+  degree_t=3,
+  degree_b=3,
   chord = 1,
-  nPts = 3,
+  nPts = 2,
   #        [yt1,  xt2, yt2,  xt3,yt3,    yb1,xb2,     yb2,xb3,    yb3  ]
-  params = [0.05,  0.3,0.1,  0.6,0.1,  -0.05,0.35,   0.02,0.5,   -0.004]
+  # params = [0.05,  0.3,0.1,  0.6,0.1,  -0.05,0.35,   0.02,0.5,   -0.004]
+  # ------- CPs on upper camber/ Cps on lower camber/ TE thickness
+  params = [0.06,  0.5,0.2,  -0.06,0.5,   -0.05,   -0.004]
   )
 
+  
+  fun : Callable = evaluateTSF
+  eval = {"blackbox": fun}
+  param = {"baseline":     [0.06, 0.5, 0.2, -0.07, 0.5, -0.05, -0.004],
+              "lb":        [0.05, 0.2,0.02, -0.05, 0.2, -0.3, -0.006],
+              "ub":        [0.1,  0.7, 0.3, -0.05, 0.8, -0.02,  -0.002],
+              "var_names": ['d1','d2','d3',  'd4','d5', 'd6',    'd7'],
+              "scaling": 1,
+              "post_dir": "/Users/ahmedb/apps/code/Bay_dev/RAF/post"} # You need to define an absolute path to be able to get the MADS.csv results file
+  options = {
+        "seed": 0,
+        "budget": 1000,
+        "tol": 1E-4,
+        "psize_init": 1.,
+        "display": True,
+        "opportunistic": False,
+        "check_cache": True,
+        "store_cache": True,
+        "collect_y": False,
+        "rich_direction": True,
+        "precision": "high",
+        "save_results": True,
+        "save_coordinates": False,
+        "save_all_best": False,
+        "parallel_mode": False
+      }
 
-  design.generate()
-  # design.visualize()
-  design.gmsh_generator(os.path.abspath('tests/CFD/SU2'))
-  design.runSU2CFD(os.path.abspath('tests/CFD/SU2'))
-  design.get_responses(os.path.abspath('tests/CFD/SU2/history.csv'), 'SU2')
+  data = {"evaluator": eval, "param": param, "options":options}
+
+  out = {}
+  out = OMADS.main(data)
+  print(out)
+
+
+  # design.generate()
+  # # design.visualize()
+  # # design.gmsh_generator(os.path.abspath('tests/CFD/SU2'))
+  # # design.runSU2CFD(os.path.abspath('tests/CFD/SU2'))
+  # # design.get_responses(os.path.abspath('tests/CFD/SU2/history.csv'), 'SU2')
+  # #TODO: install the SML using setup wheel
+  # # TODO: include this test in the main RAF file
+  # # TODO: Fix RAF bugs
   # design.create_TSFOIL_sim_files()
-  # design.create_openfoam_sim_files(4)
+  # # design.create_openfoam_sim_files(4)
   # design.run()
-  # design.get_responses(f'Design{id}.out', 'TSFOIL')
+  # design.get_responses(f'Design{0}.out', 'TSFOIL')
   # design.plot_cp()

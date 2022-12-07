@@ -39,7 +39,7 @@ from typing import List, Dict, Any, Callable, Protocol, Optional
 import numpy as np
 from numpy import cos, exp, pi, prod, sin, sqrt, subtract, inf
 
-from OMADS import Point, PreMADS, PostMADS, OrthoMesh, Parameters,  Evaluator, Cache, Directions2n, DefaultOptions
+from OMADS import Point, PreMADS, PostMADS, OrthoMesh, Parameters,  Evaluator, Cache, Dirs2n, Options
 import OMADS
 from enum import Enum, auto
 import matplotlib.pyplot as plt
@@ -419,14 +419,16 @@ class OMADS_RAF(RAF_data):
     self.ns = nsamples
 
     if self.sampling_t == SML.SAMPLING_METHOD.FULLFACTORIAL:
-      sampling = SML.FullFactorial(ns=nsamples, vlim=v, w=np.array([0.8, 0.2]), c=True)
+      sampling = SML.FullFactorial(ns=nsamples, vlim=v, w=np.array([0.1, 0.05]), c=True)
     elif self.sampling_t == SML.SAMPLING_METHOD.LH: 
       sampling = SML.LHS(ns=nsamples, vlim=v)
       self.seed += np.random.randint(0, 10000)
       sampling.options["randomness"] = self.seed
       sampling.options["criterion"] = "center"
     elif self.sampling_t == SML.SAMPLING_METHOD.RS:
-      sampling = SML.RS(ns=nsamples, vlim=v, w=None, c=False)
+      sampling = SML.RS(ns=nsamples, vlim=v)
+    elif self.sampling_t == SML.SAMPLING_METHOD.HALTON:
+      sampling = SML.halton(ns=nsamples, vlim=v, is_ham=True)
     
     Ps= copy.deepcopy(sampling.generate_samples())
     # self.visualize_samples(Ps[:, 0], Ps[:, 1])
@@ -473,14 +475,33 @@ class OMADS_RAF(RAF_data):
     return xs
   
   def visualize_samples(self, x, y):
+    
+
+
+    
+    # xx = np.linspace(-2, 2, 300)
+    # yy = np.linspace(-2, 2, 300)
+    # X, Y = np.meshgrid(xx, yy)
+    # if self.iter == 0:
+    #   r = lambda xx,yy: 100.0 * (yy - xx ** 2.0) ** 2.0 + (1 - xx) ** 2.0#abs(x*np.sin(x)+0.1*x)+abs(y*np.sin(y)+0.1*y)
+      
+
+    #   im = plt.contourf(X, Y, r(X, Y), 500, cmap='viridis_r')
+    #   plt.contour(X, Y, r(X, Y), 100, colors=['#F8F8FF'], linewidths=0.3)
+
     if isinstance(x, np.ndarray):
       plt.scatter(x, y)
       plt.grid(color='b', linestyle='--', linewidth=0.5)
-      plt.show()
+      # plt.show()
     else:
       plt.scatter(x, y, color='k')
       plt.grid(color='b', linestyle='--', linewidth=0.5)
-      plt.show()
+      # plt.show()
+    
+    # plt.colorbar(im, label="f", orientation="vertical")
+    plt.ion()
+    plt.show()
+    plt.pause(0.1)
 
     # if self.iter == 0:
     #   plt.ion()
@@ -578,9 +599,9 @@ class OMADS_RAF(RAF_data):
                 self.mToRefer = np.asarray([[i, j]])
               else:
                 self.mToRefer = np.append(self.mToRefer, [[i, j]], axis=0)
-            xh = self.models[j].evaluate_point(copy.deepcopy(x))
-            xl = self.models[i].evaluate_point(copy.deepcopy(x))
-            self.models[i].TRM.updateRadius(xh, xl, j-1)
+            # xh = self.models[j].evaluate_point(copy.deepcopy(x))
+            # xl = self.models[i].evaluate_point(copy.deepcopy(x))
+            # self.models[i].TRM.updateRadius(xh, xl, j-1)
             if breakLoop is True:
               break
           if breakLoop is True:
@@ -624,9 +645,9 @@ class OMADS_RAF(RAF_data):
             xm: List[Point] = copy.deepcopy(self.evaluate_phi_using_model_i([x], k))
             self.models[k].AA = copy.deepcopy(x.f-xm[0].f)
             self.evaluate_phi([x])
-            xh = self.models[0].evaluate_point(copy.deepcopy(x))
-            xl = self.models[k].evaluate_point(copy.deepcopy(x))
-            self.models[i].TRM.updateRadius_AA(xh, xl)
+            # xh = self.models[0].evaluate_point(copy.deepcopy(x))
+            # xl = self.models[k].evaluate_point(copy.deepcopy(x))
+            # self.models[i].TRM.updateRadius_AA(xh, xl)
       
       if self.mToRefer.size == 0:
         self.retrain_surrogates: bool = True
@@ -638,7 +659,7 @@ class OMADS_RAF(RAF_data):
         xm: Point = self.models[sorted_mToUpdate[m,1]].evaluate_point(copy.deepcopy(x))
         mh = sorted_mToRefer[0, 1]
         
-        x = self.models[mh].evaluate_point(copy.deepcopy(x))
+        # x = self.models[mh].evaluate_point(copy.deepcopy(x))
         
         self.models[sorted_mToUpdate[m,1]].RA_min[mh-1] = x.f-xm.f
         self.models[sorted_mToUpdate[m,1]].Lambda[mh-1] = np.abs(np.subtract(self.models[sorted_mToUpdate[m,1]].RA_min[mh-1], self.models[sorted_mToUpdate[m,1]].RA_min_old[mh-1]))
